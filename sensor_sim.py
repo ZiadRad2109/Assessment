@@ -49,11 +49,13 @@ class sensor_simulator:
             system_status = "ONLINE"
             try:
                 # generate a random reading around the minimum and maximum values
-                sensor_reading = round(random.gauss(mean, (maximum_value - minimum_value) / 4),2)
+                sensor_reading = round(
+                    random.gauss(mean, (maximum_value - minimum_value) / 2), 2
+                )
 
                 # generate a random number with gaussian distribution to simulate the sensor being faulty every now and then
-                sensor_faulty = round(random.gauss(1, 1),2)
-                if sensor_faulty < 0.3:
+                sensor_faulty = round(random.gauss(1, 1), 2)
+                if sensor_faulty < 0.1:
                     sensor_status = "FAULTY"
                 else:
                     sensor_status = "OK"

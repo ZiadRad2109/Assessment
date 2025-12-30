@@ -31,11 +31,15 @@ with open("config.json", "r") as f:
 
 HOST = config["host"]
 PORT = config["port"]
+refresh_interval = 1/config["refresh_rate"]
 sensor_list = config["sensors"]
 number_of_sensors = len(sensor_list)
-thread_communication_queue_list = list(
-    Queue() for _ in range(number_of_sensors)
-)  # thread communication queue
+# thread_communication_queue_list = list(
+#     deque(maxlen=20) for _ in range(number_of_sensors)
+# )  # thread communication queue
+thread_communication_queue_list = []
+for _ in range(number_of_sensors):
+    thread_communication_queue_list.append(deque(maxlen=20))
 
 
 # 3amalna thread communication queue list by using the sensor id as the index 3ashan ne kol sensor mayakhodsh el haga beta3to we yermy el ba2y
@@ -120,15 +124,27 @@ class sensor_system:
                                 #     alarm, alarm_message, alarm_timestamp
                                 # )
                                 # extract sensor data from data by using the sensor_config["sensor_id"] as the key to the data
-
+                        data_dict = {
+                            "sensor_id": sensor_id_rx,
+                            "sensor_name": sensor_name,
+                            "data": sensor_data,
+                            "timestamp": sensor_timestamp,
+                            "max_value": max_value,
+                            "min_value": min_value,
+                            "sensor_status": sensor_status,
+                            "alarm": alarm,
+                            "alarm_message": alarm_message,
+                            "alarm_timestamp": alarm_timestamp,
+                        }
                         # check if the alarm is present
                         if not alarm:
                             # emit the sensor data
-                            self.sensor_worker_signals.sensor_data_received.emit(data)
+                            self.sensor_worker_signals.sensor_data_received.emit(data_dict)
                         else:
                             # emit the alarm
                             self.sensor_worker_signals.alarm_received.emit(data)
-                            self.sensor_worker_signals.sensor_data_received.emit(data)
+                            self.sensor_worker_signals.sensor_data_received.emit(data_dict)
+                    
 
             except Exception as e:
                 print(f"SensorTask data error: {e}")
@@ -138,7 +154,7 @@ class sensor_system:
         def get_data(self, index):
             try:
                 # get data from the queue with timeout
-                raw_data = thread_communication_queue_list[index].get(timeout=10.0)
+                raw_data = thread_communication_queue_list[index][-1]
                 return raw_data
             except Empty:
                 return None
@@ -173,9 +189,9 @@ class sensor_system:
                                 )
                                 sensor_id = global_data.get("sensor_id")
                                 if sensor_id is not None:
-                                    thread_communication_queue_list[sensor_id - 1].put(
-                                        data_line
-                                    )
+                                    thread_communication_queue_list[
+                                        sensor_id - 1
+                                    ].append(data_line)
                             except json.JSONDecodeError as e:
                                 print(f"Error decoding JSON: {e}")
                         except socket.timeout:
@@ -273,6 +289,7 @@ class MainWindow(QMainWindow):
         # Data
         self.table_widget.setItem(row, 4, QTableWidgetItem(str(data.get("data"))))
         self.table_widget.resizeColumnsToContents()
+        
 
     def create_dashboard_tab(self):
         dashboard_tab = QWidget()
@@ -310,9 +327,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         for task in self.active_tasks:
             task.is_running = False
-
-        print("All workers stopped")
         self.threadpool.waitForDone()
+        print("All workers stopped")
 
 
 if __name__ == "__main__":
