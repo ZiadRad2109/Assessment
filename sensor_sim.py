@@ -23,6 +23,7 @@ with open("config.json", "r") as f:
 
 HOST = config["host"]
 PORT = config["port"]
+REFRESH_RATE = config["refresh_rate"]
 sensor_list = config["sensors"]
 number_of_sensors = len(sensor_list)
 
@@ -81,6 +82,7 @@ class sensor_simulator:
             except Exception as e:
                 print(f"Error: {e}")
                 break
+            # time.sleep(1/REFRESH_RATE)
 
     def start_workers(self, sensor: dict):
         # start the workers
@@ -106,7 +108,7 @@ class sensor_simulator:
         # wait for the workers to finish
         self.worker.join()
         # put a stop message in the queue to signal the workers to stop
-        self.message_pipe.put("STOP")
+        # self.message_pipe.put("STOP")
         print("All workers stopped")
 
     def server_run(self):
@@ -156,6 +158,8 @@ class sensor_simulator:
                 finally:
                     print("shutting down the server . . .")
                     self.stop_workers()
+                    client_sket.close()
+                    sys.exit(0)
 
 
 if __name__ == "__main__":
