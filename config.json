@@ -5,14 +5,14 @@
     "sensors": [
         {
             "sensor_id": 1,
-            "sensor_name": "Temperature_SNSR",
+            "sensor_name": "TEMP",
             "data_rate": 8,
             "minimum_value": 0.0,
             "maximum_value": 100.0
         },
         {
             "sensor_id": 2,
-            "sensor_name": "Humidity_SNSR",
+            "sensor_name": "HUM",
             "data_rate": 2,
             "minimum_value": 10.0,
             "maximum_value": 40.0
@@ -26,14 +26,14 @@
         },
         {
             "sensor_id": 4,
-            "sensor_name": "Pressure_SNSR",
+            "sensor_name": "PRESS",
             "data_rate": 5,
             "minimum_value": 100.0,
             "maximum_value": 400.0
         },
         {
             "sensor_id": 5,
-            "sensor_name": "Toxicity_SNSR",
+            "sensor_name": "TOX",
             "data_rate": 1,
             "minimum_value": 0.0,
             "maximum_value": 30.0

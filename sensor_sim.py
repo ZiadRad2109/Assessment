@@ -103,6 +103,7 @@ class sensor_simulator:
 
     def stop_workers(self):
         # stop the workers
+        
         self.system_running_flag = False
         self.worker_running_flag = False
         # wait for the workers to finish
@@ -122,14 +123,16 @@ class sensor_simulator:
 
             # bind the socket to the address and port
             sket.bind((HOST, PORT))
-
-            # listen for incoming connections
-            sket.listen()  # listening for any number of connections
+            sket.settimeout(10.0)
+            sket.listen()  
 
             print(f"Listening to server on {HOST}:{PORT} . . . \n")
 
-            # accept incoming connections
-            client_sket, client_address = sket.accept()
+            try:
+                client_sket, client_address = sket.accept()
+            except socket.timeout:
+                print("No connection established within 10 seconds. Shutting down.")
+                return
             with client_sket:  # verify active connection
                 print(f"Connection established with {client_address}")
                 # create a thread for each sensor
@@ -156,9 +159,16 @@ class sensor_simulator:
                 except (BrokenPipeError, ConnectionResetError):
                     print("Client disconnected")
                 finally:
+                    # check if a socket connection is already online (if yes send a stop message) and close the connection
+                    if client_sket:
+                        try:
+                            client_sket.sendall("STOP".encode("utf-8"))
+                            client_sket.close()
+                        except (BrokenPipeError, ConnectionResetError, OSError):
+                            pass
+
                     print("shutting down the server . . .")
                     self.stop_workers()
-                    client_sket.close()
                     sys.exit(0)
 
 

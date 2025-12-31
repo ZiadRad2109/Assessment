@@ -4,13 +4,16 @@ wraps the socket in a file object
 so we can use readline() to read the data
 """
 
+from PyQt6.QtGui import QColor
+from PyQt6.QtWidgets import QHeaderView
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QTabWidget
 import sys
 import socket
 import json
 import time
 from collections import deque
-from PyQt6.QtCore import QRunnable, QThreadPool, QThread, pyqtSignal, QObject, Qt
+from PyQt6.QtCore import QRunnable, QThreadPool, pyqtSignal, QObject, Qt
 from PyQt6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -31,15 +34,19 @@ with open("config.json", "r") as f:
 
 HOST = config["host"]
 PORT = config["port"]
-refresh_interval = 1/config["refresh_rate"]
+START_TIME = time.time()
+refresh_interval = 1 / config["refresh_rate"]
 sensor_list = config["sensors"]
 number_of_sensors = len(sensor_list)
-# thread_communication_queue_list = list(
-#     deque(maxlen=20) for _ in range(number_of_sensors)
-# )  # thread communication queue
+
 thread_communication_queue_list = []
 for _ in range(number_of_sensors):
-    thread_communication_queue_list.append(deque(maxlen=20))
+    thread_communication_queue_list.append(Queue())
+
+# plot data containers
+plot_data_deques = []
+for _ in range(number_of_sensors):
+    plot_data_deques.append(deque(maxlen=20))
 
 
 # 3amalna thread communication queue list by using the sensor id as the index 3ashan ne kol sensor mayakhodsh el haga beta3to we yermy el ba2y
@@ -57,11 +64,16 @@ class sensor_system:
         # sensor data (id, name, data,timestamp)
         sensor_data_received = pyqtSignal(dict)
 
+        # plot data (time, data)
+        plot_data_updated = pyqtSignal(dict)
+
         # system status (ONLINE, OFFLINE)
         system_status_received = pyqtSignal(str)
 
         # alarm (status, alarm,alarm_message)
         alarm_received = pyqtSignal(dict)
+
+        system_stop = pyqtSignal(str)
 
     class SensorTask(QRunnable):
         # brief: sensor task that handles the sensor data
@@ -74,6 +86,8 @@ class sensor_system:
 
         def run(self):
             try:
+                system_status = "ONLINE"
+                # self.sensor_worker_signals.system_status_received.emit(system_status)
                 while self.is_running:
                     raw_data = self.get_data(self.sensor_id - 1)
                     if raw_data:
@@ -105,6 +119,7 @@ class sensor_system:
                                     sensor_status = "OK"
                                     alarm = False
                                     alarm_message = ""
+                                    alarm_timestamp = ""
                                 else:
                                     sensor_status = "ALARM"
                                     alarm = True
@@ -136,16 +151,23 @@ class sensor_system:
                             "alarm_message": alarm_message,
                             "alarm_timestamp": alarm_timestamp,
                         }
-                        # check if the alarm is present
-                        if not alarm:
+
+                        if alarm:
                             # emit the sensor data
-                            self.sensor_worker_signals.sensor_data_received.emit(data_dict)
-                        else:
                             # emit the alarm
                             self.sensor_worker_signals.alarm_received.emit(data)
-                            self.sensor_worker_signals.sensor_data_received.emit(data_dict)
-                    
-
+                        self.sensor_worker_signals.sensor_data_received.emit(data_dict)
+                        sensor_timestamp = sensor_timestamp.split(" at ")[1]
+                        sensor_timestamp = sensor_timestamp.split(":")[1]
+                        sensor_timestamp = sensor_timestamp.split(":")[0]
+                        # convert the timestamp to seconds
+                        # set the relative timestamp to the current time (seconds) - the
+                        self.sensor_worker_signals.plot_data_updated.emit(
+                            {
+                                "sensor_id": sensor_id_rx,
+                                "data": sensor_data,
+                            }
+                        )
             except Exception as e:
                 print(f"SensorTask data error: {e}")
                 self.is_running = False
@@ -154,7 +176,7 @@ class sensor_system:
         def get_data(self, index):
             try:
                 # get data from the queue with timeout
-                raw_data = thread_communication_queue_list[index][-1]
+                raw_data = thread_communication_queue_list[index].get(timeout=1.0)
                 return raw_data
             except Empty:
                 return None
@@ -171,30 +193,44 @@ class sensor_system:
 
         def run(self):
             try:
-                sket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                with sket:
-                    sket.connect((HOST, PORT))
-                    sket.settimeout(10.0)
-                    socket_file = sket.makefile("r", encoding="utf-8")
+                self.sensor_worker_signals.system_status_received.emit("ONLINE")
+                self.sket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                with self.sket:
+                    self.sket.connect((HOST, PORT))
+                    global START_TIME
+                    START_TIME = time.time()
+                    self.sket.settimeout(10.0)
+                    socket_file = self.sket.makefile("r", encoding="utf-8")
 
                     while self.is_running:
                         try:
                             data_line = socket_file.readline()
                             if not data_line:
                                 break
+                            if data_line == "STOP":
+                                self.is_running = False
+                                self.sensor_worker_signals.system_stop.emit("STOP")
+                                break
+
                             try:
                                 global_data = json.loads(json.loads(data_line))
-                                self.sensor_worker_signals.global_data_received.emit(
-                                    data_line
-                                )
+                                # self.sensor_worker_signals.global_data_received.emit(
+                                #     data_line
+                                # )
                                 sensor_id = global_data.get("sensor_id")
                                 if sensor_id is not None:
-                                    thread_communication_queue_list[
-                                        sensor_id - 1
-                                    ].append(data_line)
+                                    thread_communication_queue_list[sensor_id - 1].put(
+                                        data_line
+                                    )
                             except json.JSONDecodeError as e:
                                 print(f"Error decoding JSON: {e}")
+                                self.sensor_worker_signals.system_status_received.emit(
+                                    "OFFLINE"
+                                )
                         except socket.timeout:
+                            self.sensor_worker_signals.system_status_received.emit(
+                                "OFFLINE"
+                            )
                             continue
             except Exception as e:
                 print(f"Error: {e}")
@@ -206,8 +242,18 @@ class sensor_system:
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        # declare containers dictionaries to map the data to its respective sensor
+        self.sensor_data = {}
+        self.active_tasks = []
+        self.graph_widgets = []
+        self.data_curves = []
+        self.alarms = {}
+        self.time_axis_data = {}
+
         self.setWindowTitle("Si-Ware Sensor Dashboard Simulator")
-        self.setGeometry(100, 100, 1200, 800)
+        self.window_width = 1200
+        self.window_height = 800
+        self.setGeometry(100, 100, self.window_width, self.window_height)
 
         # set up tabs
         self.tabs = QTabWidget()
@@ -236,16 +282,16 @@ class MainWindow(QMainWindow):
         # create a thread pool to handle the sensor data threads
         self.threadpool = QThreadPool.globalInstance()
 
-        # declare containers dictionaries to map the data to its respective sensor
-        self.sensor_data = {}
-        self.active_tasks = []
-        self.graph_widgets = {}
-        self.data_curves = {}
-        self.alarms = {}
-        self.time_axis_data = {}
+        # Deques for plotting: (time_seconds, value)
+        self.sensor_plot_data = [deque(maxlen=20) for _ in range(number_of_sensors)]
         main_task = sensor_system.TCPTask(sensor_list)
         self.active_tasks.append(main_task)
-        main_task.sensor_worker_signals.global_data_received.connect(self.refresh_gui)
+        main_task.sensor_worker_signals.system_status_received.connect(
+            self.update_system_status
+        )
+        main_task.sensor_worker_signals.system_stop.connect(self.stop_workers)
+
+        # main_task.sensor_worker_signals.global_data_received.connect(self.refresh_gui)
         # main_task.sensor_worker_signals.alarm_received.connect(self.refresh_alarms)
         self.threadpool.start(main_task)
         for i in range(number_of_sensors):
@@ -253,14 +299,41 @@ class MainWindow(QMainWindow):
         # update sensor data rows in the table widget
         # self.update_sensor_data_rows()
 
+    def stop_workers(self):
+        print("STOP received ... ")
+        for task in self.active_tasks:
+            task.is_running = False
+            self.system_status_label.setText("System Status: OFFLINE")
+            self.system_status_label.setStyleSheet("color: red;")
+        sys.exit(app.exec())
+
+    def update_system_status(self, system_status):
+        self.system_status_label.setText(f"System Status: {system_status}")
+        if system_status == "ONLINE":
+            self.system_status_label.setStyleSheet("color: green;")
+        else:
+            self.system_status_label.setStyleSheet("color: red;")
+
     def start_workers(self, sensor_id):
         self.is_running = True
 
         sensor_task = sensor_system.SensorTask(sensor_id)
         self.active_tasks.append(sensor_task)
         sensor_task.sensor_worker_signals.sensor_data_received.connect(self.refresh_gui)
+        sensor_task.sensor_worker_signals.plot_data_updated.connect(self.update_plot)
         # sensor_task.sensor_worker_signals.alarm_received.connect(self.refresh_alarms)
         self.threadpool.start(sensor_task)
+
+    def update_plot(self, data):
+        # update plot
+        sensor_id = data.get("sensor_id")
+        # timestamp = data.get("timestamp")
+        value = data.get("data")
+        relative_time = time.time() - START_TIME
+        plot_data_deques[sensor_id - 1].append((relative_time, value))
+        data_x = [x for x, _ in plot_data_deques[sensor_id - 1]]
+        data_y = [y for _, y in plot_data_deques[sensor_id - 1]]
+        self.data_curves[sensor_id - 1].setData(data_x, data_y)
 
     def refresh_gui(self, data):
         # update table cells values
@@ -280,16 +353,28 @@ class MainWindow(QMainWindow):
         )
 
         # Status
+        # set the background color of the status cell based on the status
         status = data.get("sensor_status", "UNKNOWN")
         self.table_widget.setItem(row, 2, QTableWidgetItem(status))
+        color_map = {
+            "OK": QColor(0, 100, 0),
+            "UNKNOWN": QColor(75, 0, 130),
+            "FAULTY": QColor(255, 140, 0),
+            "ALARM": QColor(139, 0, 0),
+        }
+        bg_color = color_map.get(status, QColor(75, 0, 130))
+
+        for i in range(self.table_widget.columnCount()):
+            item = self.table_widget.item(row, i)
+            if item:
+                item.setBackground(bg_color)
 
         # Timestamp
         self.table_widget.setItem(row, 3, QTableWidgetItem(str(data.get("timestamp"))))
 
         # Data
         self.table_widget.setItem(row, 4, QTableWidgetItem(str(data.get("data"))))
-        self.table_widget.resizeColumnsToContents()
-        
+        self.table_widget.item(row, 4).setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
     def create_dashboard_tab(self):
         dashboard_tab = QWidget()
@@ -302,15 +387,42 @@ class MainWindow(QMainWindow):
             self.system_status_label,
             alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop,
         )
+        self.system_status_label.setStyleSheet("color: red;font-size: 20px;")
 
         # add table widget
         self.table_widget = QTableWidget()
-        self.table_widget.setRowCount(6)
+        self.table_widget.setRowCount(number_of_sensors)
         self.table_widget.setColumnCount(5)
         self.table_widget.setHorizontalHeaderLabels(
             ["Sensor ID", "Sensor Name", "Status", "Timestamp", "Data"]
         )
-        self.table_widget.resizeColumnsToContents()
+
+        # Set font for the table
+        font = QFont()
+        font.setPointSize(
+            14
+        )  # User asked for readable, 24 might be too big for default rows but I will set it to what they seem to want roughly, or stick to auto-fit.
+        # Actually user code had 24, let's try 18 as a balance or 24 if they really want big.
+        # "adjust font sizes if neccessary but i want the text to be readable"
+        font.setPointSize(14)
+        self.table_widget.setFont(font)
+
+        # Configure Header Resizing
+        header = self.table_widget.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # ID
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # Name
+        header.setSectionResizeMode(
+            2, QHeaderView.ResizeMode.ResizeToContents
+        )  # Status
+        header.setSectionResizeMode(
+            3, QHeaderView.ResizeMode.ResizeToContents
+        )  # Timestamp
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)  # Data
+
+        # Fit rows to content (font size)
+        self.table_widget.verticalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.ResizeToContents
+        )
 
         # Initialize rows with placeholders
         for i in range(number_of_sensors):
@@ -322,6 +434,19 @@ class MainWindow(QMainWindow):
             self.table_widget.setItem(i, 4, QTableWidgetItem("-"))
 
         dashboard_layout.addWidget(self.table_widget)
+
+        # add plots distributed evenly accross the width of the screen
+        # and number of plots is equal to the number fo sensors
+
+        for i in range(number_of_sensors):
+            plot_widget = pg.PlotWidget(title=f"{config['sensors'][i]['sensor_name']}")
+            plot_widget.setLabel("left", "Data")
+            plot_widget.setLabel("bottom", "Time")
+            plot_widget.showGrid(x=True, y=True)
+            dashboard_layout.addWidget(plot_widget)
+            self.graph_widgets.append(plot_widget)
+            self.data_curves.append(plot_widget.plot())
+
         return dashboard_tab
 
     def closeEvent(self, event):
@@ -329,6 +454,7 @@ class MainWindow(QMainWindow):
             task.is_running = False
         self.threadpool.waitForDone()
         print("All workers stopped")
+        event.accept()
 
 
 if __name__ == "__main__":
