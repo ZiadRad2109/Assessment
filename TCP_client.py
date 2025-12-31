@@ -251,8 +251,8 @@ class MainWindow(QMainWindow):
         self.time_axis_data = {}
 
         self.setWindowTitle("Si-Ware Sensor Dashboard Simulator")
-        self.window_width = 1200
-        self.window_height = 800
+        self.window_width = 1600
+        self.window_height = 900
         self.setGeometry(100, 100, self.window_width, self.window_height)
 
         # set up tabs
@@ -327,6 +327,7 @@ class MainWindow(QMainWindow):
     def update_plot(self, data):
         # update plot
         sensor_id = data.get("sensor_id")
+        
         # timestamp = data.get("timestamp")
         value = data.get("data")
         relative_time = time.time() - START_TIME
@@ -437,15 +438,19 @@ class MainWindow(QMainWindow):
 
         # add plots distributed evenly accross the width of the screen
         # and number of plots is equal to the number fo sensors
+        # add a horizontal layout to the dashboard layout
+        plot_layout = QHBoxLayout()
 
+        dashboard_layout.addLayout(plot_layout)
         for i in range(number_of_sensors):
+            plot_colors = ['r','g','c','y','w'][i%5]
             plot_widget = pg.PlotWidget(title=f"{config['sensors'][i]['sensor_name']}")
             plot_widget.setLabel("left", "Data")
             plot_widget.setLabel("bottom", "Time")
             plot_widget.showGrid(x=True, y=True)
-            dashboard_layout.addWidget(plot_widget)
+            plot_layout.addWidget(plot_widget)
             self.graph_widgets.append(plot_widget)
-            self.data_curves.append(plot_widget.plot())
+            self.data_curves.append(plot_widget.plot(pen=plot_colors))
 
         return dashboard_tab
 
