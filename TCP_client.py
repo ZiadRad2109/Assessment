@@ -1,7 +1,10 @@
 """
-TCP client
-wraps the socket in a file object
-so we can use readline() to read the data
+this is a TCP client that connects to a server and receives data from it
+the data is then processed and displayed in a GUI
+the GUI has a dashboard tab and an alarms tab
+the dashboard tab has a table and a set of plots
+the alarms tab has a list of alarms
+the data is split across multiple threads
 """
 
 from PyQt6.QtCore import QTimer
@@ -42,10 +45,12 @@ with open("config.json", "r") as f:
 HOST = config["host"]
 PORT = config["port"]
 START_TIME = time.time()
-refresh_interval = 1 / config["refresh_rate"]
+# sensor list and number of sensors are used to create the threads and the GUI for each sensor
 sensor_list = config["sensors"]
 number_of_sensors = len(sensor_list)
 
+# thread communication queue list is used to pass data between the threads
+# there's a queue for each sensor task
 thread_communication_queue_list = []
 for _ in range(number_of_sensors):
     thread_communication_queue_list.append(Queue())
@@ -59,8 +64,7 @@ for _ in range(number_of_sensors):
 alarm_list = []
 
 
-
-# 3amalna thread communication queue list by using the sensor id as the index 3ashan ne kol sensor mayakhodsh el haga beta3to we yermy el ba2y
+# thread communication queue list by using the sensor id as the index 3ashan kol sensor mayakhodsh el haga beta3to we yermy el ba2y
 class sensor_system:
     def __init__(self):
         self.sensor_list = sensor_list
@@ -91,21 +95,26 @@ class sensor_system:
         # param sensor_config: sensor configuration
         def __init__(self, sensor_id: int):
             super().__init__()
+            # declare the signals
             self.sensor_worker_signals = sensor_system.sensor_worker_signals()
+
+            # set running flag and sensor id
             self.is_running = True
             self.sensor_id = sensor_id
 
         def run(self):
             try:
-                system_status = "ONLINE"
-                # self.sensor_worker_signals.system_status_received.emit(system_status)
+                # while the sensor task is running receive data from the server
                 while self.is_running:
+                    # read data from the server
                     raw_data = self.get_data(self.sensor_id - 1)
                     if raw_data:
+                        # for some reason the data is received as a string of a string
                         data = json.loads(json.loads(raw_data))
                     else:
                         continue
                     # print(data)
+                    #create a dictionary from the data
                     if data:
                         sensor_id_rx = data["sensor_id"]
                         if sensor_id_rx == self.sensor_id:
@@ -121,6 +130,7 @@ class sensor_system:
                             # print(
                             #     f"sensor_id: {sensor_id_rx}, sensor_name: {sensor_name}, sensor_data: {sensor_data}, sensor_timestamp: {sensor_timestamp}, max_value: {max_value}, min_value: {min_value}, sensor_status: {sensor_status}"
                             # )
+                            # check if the sensor is online or faulty
                             if sensor_status == "OK":
                                 # alarm handling
                                 if (
@@ -135,6 +145,7 @@ class sensor_system:
                                 else:
                                     sensor_status = "ALARM"
                                     alarm = True
+                                    #define alarm messages
                                     if sensor_data < min_value:
                                         alarm_message = f"{sensor_name} reading is LOW"
                                         alarm_type = "LOW"
@@ -180,6 +191,7 @@ class sensor_system:
                                 "max_value": max_value,
                                 "min_value": min_value,
                             }
+                            # windows notification popup
                             notification.notify(
                                 title=f"{sensor_name} SENSOR ALARM",
                                 message=alarm_message,
@@ -189,12 +201,9 @@ class sensor_system:
                             self.sensor_worker_signals.alarm_received.emit(alarm_data)
                             # add the alarm to the alarm list
                             alarm_list.append(alarm_data)
+                        # emit the sensor data update signal
                         self.sensor_worker_signals.sensor_data_received.emit(data_dict)
-                        sensor_timestamp = sensor_timestamp.split(" at ")[1]
-                        sensor_timestamp = sensor_timestamp.split(":")[1]
-                        sensor_timestamp = sensor_timestamp.split(":")[0]
-                        # convert the timestamp to seconds
-                        # set the relative timestamp to the current time (seconds) - the
+                        # emit the plot data update signal
                         self.sensor_worker_signals.plot_data_updated.emit(
                             {
                                 "sensor_id": sensor_id_rx,
@@ -220,43 +229,59 @@ class sensor_system:
     class TCPTask(QRunnable):
         def __init__(self, sensor_config_list: list):
             super().__init__()
+            # initialize the sensor worker signals
             self.sensor_worker_signals = sensor_system.sensor_worker_signals()
+            # initialize the running flag
             self.is_running = True
+            # initialize the sensor config list
             self.sensor_config_list = sensor_config_list
+            # initialize the stop pressed flag
             self.stop_pressed_flag = False
 
         def run(self):
             try:
+                # emit the system status signal
                 self.sensor_worker_signals.system_status_received.emit("ONLINE")
+                # create a socket
                 self.sket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 with self.sket:
+                    # connect to the server
                     self.sket.connect((HOST, PORT))
+                    # set the start time of the program to be used when plotting
                     global START_TIME
                     START_TIME = time.time()
+                    # set the socket timeout
                     self.sket.settimeout(10.0)
+                    # create a file object
                     socket_file = self.sket.makefile("r", encoding="utf-8")
 
                     while self.is_running:
                         try:
+                            if self.stop_pressed_flag:
+                                # skip the rest of the loop (keep connection alive without reading data)
+                                continue
+                            # read the data line by line as a file (data delimited by \n)
                             data_line = socket_file.readline()
                             if not data_line:
                                 break
+                            # if the data line is STOP, break the loop
                             if data_line == "STOP":
                                 self.is_running = False
+                                # emit the system stop signal
                                 self.sensor_worker_signals.system_stop.emit("STOP")
+                                # close the socket
                                 self.sket.close()
                                 break
-                            if self.stop_pressed_flag:
-                                continue
                             try:
+                                # parse the data line, for some reason the data is presented as a string of a string of a dictionary
                                 global_data = json.loads(json.loads(data_line))
-                                # self.sensor_worker_signals.global_data_received.emit(
-                                #     data_line
-                                # )
+                                # extract the sensor id
                                 sensor_id = global_data.get("sensor_id")
+                                # emit the global data received signal (to be used for logs)
                                 self.sensor_worker_signals.global_data_received.emit(
                                     json.loads(data_line)
                                 )
+                                # if the sensor id is not None, put the data in the queue for the sensor thread to process
                                 if sensor_id is not None:
                                     thread_communication_queue_list[sensor_id - 1].put(
                                         data_line
@@ -289,6 +314,7 @@ class MainWindow(QMainWindow):
         self.alarms = {}
         self.time_axis_data = {}
 
+        # set window title and size
         self.setWindowTitle("Si-Ware Sensor Dashboard Simulator")
         self.window_width = 1600
         self.window_height = 900
@@ -312,17 +338,20 @@ class MainWindow(QMainWindow):
         # set up main widget
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
+        # set up main layout
         self.mainlayout = QVBoxLayout()
         central_widget.setLayout(self.mainlayout)
 
         # set up title label
         self.title_label = QLabel("Si-Ware Sensor Dashboard Simulator")
         self.title_label.setStyleSheet("font-size: 24px; font-weight: bold;")
+
         # add title label to main layout and set alignment to center and top
         self.mainlayout.addWidget(
             self.title_label,
             alignment=Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignTop,
         )
+
         # add tabs to main layout
         self.mainlayout.addWidget(self.tabs)
 
@@ -331,58 +360,76 @@ class MainWindow(QMainWindow):
 
         # Deques for plotting: (time_seconds, value)
         self.sensor_plot_data = [deque(maxlen=20) for _ in range(number_of_sensors)]
+
+        # create the main task (tcp connection and data parsing)
         main_task = sensor_system.TCPTask(sensor_list)
+
+        # append the task to the list of active tasks (to be monitored later)
         self.active_tasks.append(main_task)
+
+        # system status update callback
         main_task.sensor_worker_signals.system_status_received.connect(
             self.update_system_status
         )
+
+        # system stop callback
         main_task.sensor_worker_signals.system_stop.connect(self.stop_workers)
 
+        # global data received callback to refresh the log in the maintenance tab
         main_task.sensor_worker_signals.global_data_received.connect(self.refresh_log)
-        # main_task.sensor_worker_signals.alarm_received.connect(self.refresh_alarms)
-        self.threadpool.start(main_task)
-        self.start_workers()
-        # update sensor data rows in the table widget
 
-        # self.update_sensor_data_rows()
+        # start the main task
+        self.threadpool.start(main_task)
+
+        # start the worker threads (sensor tasks)
+        self.start_workers()
+
 
     # this tab's widgets should only be accessed after prompting the user for a username and password and verifying the correct credentials
     # the credentials are: username = admin, password = admin
-
     def create_maintenance_tab(self):
+        # create the maintenance main widget using a stacked layout (for login and maintenance content)
         maintenance_tab = QWidget()
         self.maintenance_stacked_layout = QStackedLayout()
         maintenance_tab.setLayout(self.maintenance_stacked_layout)
 
-        
-        # --- Page 0: Login ---
+        # create the login page widget and layout
         login_page = QWidget()
         login_page_layout = QVBoxLayout(login_page)
 
+        # create the login widget using a form layout
         login_widget = QWidget()
         login_widget.setFixedWidth(300)
         login_layout = QFormLayout(login_widget)
 
+        # create the username and password inputs
         self.username_input = QLineEdit()
         self.password_input = QLineEdit()
-        # password mode echo
+
+        # password mode echo ( to cover the password while typing it )
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
 
+        # add the username and password inputs to the login  form layout
         login_layout.addRow("Username:", self.username_input)
         login_layout.addRow("Password:", self.password_input)
 
+        # create the login error label
         self.login_error_label = QLabel("")
         self.login_error_label.setStyleSheet("color: red;")
         login_layout.addRow(self.login_error_label)
 
+        # create the login button and connect it to the check_credentials method
         login_button = QPushButton("Login")
         login_button.clicked.connect(self.check_credentials)
         login_layout.addRow(login_button)
 
-        login_page_layout.addWidget(login_widget, alignment=Qt.AlignmentFlag.AlignCenter)
+        # add the login widget to the login page layout and center it
+        login_page_layout.addWidget(
+            login_widget, alignment=Qt.AlignmentFlag.AlignCenter
+        )
         self.maintenance_stacked_layout.addWidget(login_page)
 
-        # --- Page 1: Maintenance Content ---
+        # create the maintenance content page widget and layout
         maintenance_content_widget = QWidget()
         maintenance_layout = QVBoxLayout()
         maintenance_content_widget.setLayout(maintenance_layout)
@@ -395,95 +442,126 @@ class MainWindow(QMainWindow):
             alignment=Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignTop,
         )
 
+        # create the log widget using plain text edit widget so that it mimics the terminal and add it to the maintenance layout
         self.log_widget = QPlainTextEdit()
         self.log_widget.setReadOnly(True)
         maintenance_layout.addWidget(self.log_widget)
 
+        # create the maintenance buttons layout and add it to the maintenance layout
         maintenance_buttons_layout = QHBoxLayout()
         maintenance_layout.addLayout(maintenance_buttons_layout)
 
-        # buttons are colored blue
+        # create the restart button to restart the sensor tasks
         self.restart_button = QPushButton("Restart")
         self.restart_button.setStyleSheet("background-color: green; color: black;")
         self.restart_button.clicked.connect(self.restart_workers)
         maintenance_buttons_layout.addWidget(self.restart_button)
 
+        # create the stop button to stop the sensor tasks but maintain the connection
         self.stop_button = QPushButton("Stop")
         self.stop_button.setStyleSheet("background-color: red; color: black;")
         self.stop_button.clicked.connect(self.stop_workers)
         maintenance_buttons_layout.addWidget(self.stop_button)
 
+        # create the clear logs button to clear the log widget
         self.clear_logs_button = QPushButton("Clear Logs")
         self.clear_logs_button.setStyleSheet("background-color: yellow; color: black;")
         self.clear_logs_button.clicked.connect(self.clear_logs)
         maintenance_buttons_layout.addWidget(self.clear_logs_button)
 
+        # create the clear alarms button to clear the alarms
         self.clear_alarms_button = QPushButton("Clear Alarms")
-        self.clear_alarms_button.setStyleSheet(
-            "background-color: orange; color: black;"
-        )
+        self.clear_alarms_button.setStyleSheet("background-color: orange; color: black;")
         self.clear_alarms_button.clicked.connect(self.clear_alarms)
         maintenance_buttons_layout.addWidget(self.clear_alarms_button)
 
+        # add the maintenance content widget to the maintenance stacked layout
         self.maintenance_stacked_layout.addWidget(maintenance_content_widget)
 
         return maintenance_tab
 
     def check_credentials(self):
+        # get the username and password from the inputs
         username = self.username_input.text()
         password = self.password_input.text()
+        
+        # check if the credentials are correct
         if username == "admin" and password == "admin":
             self.maintenance_stacked_layout.setCurrentIndex(1)
             self.login_error_label.setText("")
-            # Clear credentials for security (optional, but good practice)
+            # Clear credentials for security
             self.username_input.clear()
             self.password_input.clear()
         else:
+            # show error message if wrong credentials are entered
             self.login_error_label.setText("Wrong credentials")
 
     def clear_alarms(self):
+        # clear the alarms table and alarms list and restore the table to its original state
         self.log_widget.appendPlainText("Clearing alarms ... ")
         self.alarms_table.clearContents()
         self.alarms_table.setRowCount(0)
         alarm_list.clear()
 
     def clear_logs(self):
+        # clear the log terminal
         self.log_widget.clear()
 
     def refresh_log(self, data):
+        # append the data to the log terminal
         self.log_widget.appendPlainText(str(data))
 
-    def stop_workers(self):
+    def stop_workers(self,data=""):
+        # stop the sensor tasks
         print("STOP received ... ")
         for task in self.active_tasks:  # skip the first task as it is the main task
             if task is not self.active_tasks[0]:
                 task.is_running = False
             else:
+                # stop the data collection but keep the main task running
                 task.stop_pressed_flag = True
+            # update the system status label
             self.system_status_label.setText("System Status: OFFLINE")
             self.system_status_label.setStyleSheet("color: red;")
+        if data == "STOP":
+            self.log_widget.appendPlainText("Server terminated the connection, alf salama :)")
+            print("Server terminated the connection, alf salama :)")
+            time.sleep(1)
+            sys.exit(0)
 
     def update_system_status(self, system_status):
+        # update the system status label
         self.system_status_label.setText(f"System Status: {system_status}")
+        # set the label color based on the system status
         if system_status == "ONLINE":
             self.system_status_label.setStyleSheet("color: green;")
         else:
             self.system_status_label.setStyleSheet("color: red;")
 
     def restart_workers(self):
+        # restart the sensor tasks
         self.log_widget.appendPlainText("Restarting workers ... ")
 
+        # stop the sensor tasks
         self.stop_workers()
 
+        # update the system status label
         self.system_status_label.setText("System Status: ONLINE")
         self.system_status_label.setStyleSheet("color: green;")
+
+        # start the sensor tasks after 3 seconds
         QTimer.singleShot(3000, self.start_workers)
 
     def start_workers(self):
+        # start the sensor tasks
         self.is_running = True
+
+        # restart the data collection of the main task
         self.active_tasks[0].stop_pressed_flag = False
+        # for each sensor task, create a new task and start it and connect its signals to their respective callbacks
         for sensor_id in range(number_of_sensors):
             sensor_task = sensor_system.SensorTask(sensor_id + 1)
+            # add the sensor task to the active tasks list (for monitoring purposes)
             self.active_tasks.append(sensor_task)
             sensor_task.sensor_worker_signals.sensor_data_received.connect(
                 self.refresh_gui
@@ -496,6 +574,8 @@ class MainWindow(QMainWindow):
             )
             print(f"Sensor Task {sensor_id + 1} has started")
             self.log_widget.appendPlainText(f"Sensor Task {sensor_id + 1} has started")
+
+            # start the sensor task
             self.threadpool.start(sensor_task)
 
     def update_plot(self, data):
@@ -504,25 +584,32 @@ class MainWindow(QMainWindow):
 
         # timestamp = data.get("timestamp")
         value = data.get("data")
+
+        #get the relative time, by subtracting the start time from the current time
         relative_time = time.time() - START_TIME
+        # deques have a window of 20 data points
         plot_data_deques[sensor_id - 1].append((relative_time, value))
+        # get the x and y values from the deque
         data_x = [x for x, _ in plot_data_deques[sensor_id - 1]]
         data_y = [y for _, y in plot_data_deques[sensor_id - 1]]
+        # update the plot
         self.data_curves[sensor_id - 1].setData(data_x, data_y)
 
     def refresh_alarms(self, data):
         # update table cells values
         self.alarms_table.setRowCount(len(alarm_list))
+        # if the data is a string, convert it to a dictionary
         if not isinstance(data, dict):
             data = json.loads(
                 json.loads(data)
-            )  # for some reason the data is a string wrapped in a string
+            )  # for some reason the data dictionary is a string wrapped in a string
         sensor_id = data.get("sensor_id")
         alarm_type = data.get("alarm_type")
         timestamp = data.get("timestamp")
         message = data.get("message")
         sensor_name = data.get("sensor_name")
         if sensor_id:
+            # get the row index
             row = len(alarm_list) - 1
             # ["Sensor ID", "Sensor Name", "Alarm Type", "Timestamp", "Message"]
             self.alarms_table.setItem(row, 0, QTableWidgetItem(str(sensor_id)))
@@ -544,17 +631,16 @@ class MainWindow(QMainWindow):
                 if item:
                     item.setBackground(bg_color)
 
-            self.alarms_table.setItem(row, 3, QTableWidgetItem(str(timestamp)))
-            self.alarms_table.setItem(row, 4, QTableWidgetItem(str(message)))
-
     def refresh_gui(self, data):
         # update table cells values
         if not isinstance(data, dict):
+            # for some reason the data dictionary is a string wrapped in a string
             data = json.loads(json.loads(data))
+        # get the row index
         sensor_id = data.get("sensor_id")
+
         if sensor_id:
             row = sensor_id - 1
-            # ["Sensor ID", "Sensor Name", "Status", "Timestamp", "Data"]
 
         # Sensor ID
         self.table_widget.setItem(row, 0, QTableWidgetItem(str(sensor_id)))
@@ -568,7 +654,8 @@ class MainWindow(QMainWindow):
         # set the background color of the status cell based on the status
         status = data.get("sensor_status", "UNKNOWN")
         self.table_widget.setItem(row, 2, QTableWidgetItem(status))
-        # set the background color of the row
+        
+        # set the background color of the row depending on the status
         color_map = {
             "OK": QColor(0, 100, 0),
             "UNKNOWN": QColor(75, 0, 130),
@@ -576,7 +663,6 @@ class MainWindow(QMainWindow):
             "ALARM": QColor(139, 0, 0),
         }
         bg_color = color_map.get(status)
-
         for i in range(self.table_widget.columnCount()):
             item = self.table_widget.item(row, i)
             if item:
@@ -594,6 +680,8 @@ class MainWindow(QMainWindow):
         alarms_tab = QWidget()
         alarms_layout = QVBoxLayout()
         alarms_tab.setLayout(alarms_layout)
+
+        # alarms label
         alarms_label = QLabel("Alarms")
         alarms_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         alarms_label.setStyleSheet("color: red;font-size: 20px;")
@@ -642,15 +730,10 @@ class MainWindow(QMainWindow):
 
         # Set font for the table
         font = QFont()
-        font.setPointSize(
-            14
-        )  # User asked for readable, 24 might be too big for default rows but I will set it to what they seem to want roughly, or stick to auto-fit.
-        # Actually user code had 24, let's try 18 as a balance or 24 if they really want big.
-        # "adjust font sizes if neccessary but i want the text to be readable"
         font.setPointSize(14)
         self.table_widget.setFont(font)
 
-        # Configure Header Resizing
+        # header is auto-fit except for the data column which is stretched to the remaining space
         header = self.table_widget.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # ID
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # Name
@@ -672,19 +755,20 @@ class MainWindow(QMainWindow):
             # self.table_widget.insertRow(i)
             self.table_widget.setItem(i, 0, QTableWidgetItem(str(i + 1)))
             self.table_widget.setItem(i, 1, QTableWidgetItem(f"Sensor {i + 1}"))
-            self.table_widget.setItem(i, 2, QTableWidgetItem("WAITING"))
+            self.table_widget.setItem(i, 2, QTableWidgetItem("UNKNOWN"))
             self.table_widget.setItem(i, 3, QTableWidgetItem("-"))
             self.table_widget.setItem(i, 4, QTableWidgetItem("-"))
 
         dashboard_layout.addWidget(self.table_widget)
 
         # add plots distributed evenly accross the width of the screen
-        # and number of plots is equal to the number fo sensors
-        # add a horizontal layout to the dashboard layout
+        # and number of plots is equal to the number of sensors
         plot_layout = QHBoxLayout()
-
         dashboard_layout.addLayout(plot_layout)
         for i in range(number_of_sensors):
+            # loop through the sensors and add a plot for each sensor
+            # each plot has a title, left and bottom labels, grid, and a curve
+            # each plot also has a color
             plot_colors = ["r", "g", "c", "y", "w"][i % 5]
             plot_widget = pg.PlotWidget(title=f"{config['sensors'][i]['sensor_name']}")
             plot_widget.setLabel("left", "Data")
@@ -697,6 +781,7 @@ class MainWindow(QMainWindow):
         return dashboard_tab
 
     def closeEvent(self, event):
+        # clean close the application
         for task in self.active_tasks:
             task.is_running = False
         self.threadpool.waitForDone()
@@ -705,12 +790,8 @@ class MainWindow(QMainWindow):
 
 
 if __name__ == "__main__":
+    # the main application loop
     app = QApplication(sys.argv)
     main_window = MainWindow()
     main_window.show()
     sys.exit(app.exec())
-    # try:
-    #     client_run()
-    # except KeyboardInterrupt:
-    #     print("\nClient stopped by user")
-    #     sys.exit(0)
