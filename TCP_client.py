@@ -59,7 +59,6 @@ for _ in range(number_of_sensors):
 alarm_list = []
 
 
-
 # 3amalna thread communication queue list by using the sensor id as the index 3ashan ne kol sensor mayakhodsh el haga beta3to we yermy el ba2y
 class sensor_system:
     def __init__(self):
@@ -189,9 +188,6 @@ class sensor_system:
                             self.sensor_worker_signals.alarm_received.emit(alarm_data)
                             # add the alarm to the alarm list
                             alarm_list.append(alarm_data)
-                            # save the alarm to the alarm log file
-                            with open(alarm_log_file, "a") as f:
-                                f.write(json.dumps(alarm_data) + "\n")
                         self.sensor_worker_signals.sensor_data_received.emit(data_dict)
                         sensor_timestamp = sensor_timestamp.split(" at ")[1]
                         sensor_timestamp = sensor_timestamp.split(":")[1]
@@ -357,7 +353,6 @@ class MainWindow(QMainWindow):
         self.maintenance_stacked_layout = QStackedLayout()
         maintenance_tab.setLayout(self.maintenance_stacked_layout)
 
-        
         # --- Page 0: Login ---
         login_page = QWidget()
         login_page_layout = QVBoxLayout(login_page)
@@ -382,7 +377,9 @@ class MainWindow(QMainWindow):
         login_button.clicked.connect(self.check_credentials)
         login_layout.addRow(login_button)
 
-        login_page_layout.addWidget(login_widget, alignment=Qt.AlignmentFlag.AlignCenter)
+        login_page_layout.addWidget(
+            login_widget, alignment=Qt.AlignmentFlag.AlignCenter
+        )
         self.maintenance_stacked_layout.addWidget(login_page)
 
         # --- Page 1: Maintenance Content ---
