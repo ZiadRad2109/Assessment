@@ -57,7 +57,7 @@ for _ in range(number_of_sensors):
 
 # alarm list and alarm log file
 alarm_list = []
-alarm_log_file = "alarm_log.txt"
+
 
 
 # 3amalna thread communication queue list by using the sensor id as the index 3ashan ne kol sensor mayakhodsh el haga beta3to we yermy el ba2y
@@ -189,9 +189,6 @@ class sensor_system:
                             self.sensor_worker_signals.alarm_received.emit(alarm_data)
                             # add the alarm to the alarm list
                             alarm_list.append(alarm_data)
-                            # save the alarm to the alarm log file
-                            with open(alarm_log_file, "a") as f:
-                                f.write(json.dumps(alarm_data) + "\n")
                         self.sensor_worker_signals.sensor_data_received.emit(data_dict)
                         sensor_timestamp = sensor_timestamp.split(" at ")[1]
                         sensor_timestamp = sensor_timestamp.split(":")[1]
