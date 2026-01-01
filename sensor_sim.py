@@ -51,16 +51,15 @@ class sensor_simulator:
             try:
                 # generate a random reading around the minimum and maximum values
                 sensor_reading = round(
-                    random.gauss(mean, (maximum_value - minimum_value) / 2), 2
+                    random.gauss(mean, (maximum_value - minimum_value) / 6), 2
                 )
 
                 # generate a random number with gaussian distribution to simulate the sensor being faulty every now and then
-                sensor_faulty = round(random.gauss(1, 1), 2)
-                if sensor_faulty < 0.1:
+                sensor_faulty = round(random.gauss(10, 1), 2)
+                if sensor_faulty < 7:
                     sensor_status = "FAULTY"
                 else:
                     sensor_status = "OK"
-
                 # data payload
                 data_payload = {
                     "system_status": system_status,
@@ -103,7 +102,7 @@ class sensor_simulator:
 
     def stop_workers(self):
         # stop the workers
-        
+
         self.system_running_flag = False
         self.worker_running_flag = False
         # wait for the workers to finish
@@ -124,7 +123,7 @@ class sensor_simulator:
             # bind the socket to the address and port
             sket.bind((HOST, PORT))
             sket.settimeout(10.0)
-            sket.listen()  
+            sket.listen()
 
             print(f"Listening to server on {HOST}:{PORT} . . . \n")
 
