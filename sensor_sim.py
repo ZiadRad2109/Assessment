@@ -1,4 +1,6 @@
 """
+Sensor Simulator Module.
+
 this script simulates sensors that send data to a server
 the server is running in the same machine.
 1) it reads configuration from 'config.json'
@@ -29,7 +31,20 @@ number_of_sensors = len(sensor_list)
 
 
 class sensor_simulator:
+    """
+    Simulates a sensor network server.
+
+    Manages multiple sensor workers, aggregates their data, acts as a TCP server
+    to stream this data to a connected client.
+    """
+
     def __init__(self, num_sensors=number_of_sensors):
+        """
+        Initialize the sensor simulator.
+
+        Args:
+            num_sensors (int): Number of sensors to simulate. Defaults to the number in config.
+        """
         # initialize the sensor simulator
 
         self.num_sensors = num_sensors
@@ -38,6 +53,15 @@ class sensor_simulator:
         self.message_pipe = queue.Queue()  # queue is used to store the messages
 
     def sensor_worker(self, sensor_cfg: dict):
+        """
+        Worker function to simulate a single sensor.
+
+        Generates random data based on configuration, detects faults, and puts
+        data into the message queue.
+
+        Args:
+            sensor_cfg (dict): Configuration dictionary for the specific sensor.
+        """
         sensor_id = sensor_cfg["sensor_id"]
         sensor_name = sensor_cfg["sensor_name"]
         data_rate = sensor_cfg["data_rate"]
@@ -84,6 +108,15 @@ class sensor_simulator:
             # time.sleep(1/REFRESH_RATE)
 
     def start_workers(self, sensor: dict):
+        """
+        Start a worker thread for a given sensor.
+
+        Args:
+            sensor (dict): Sensor configuration.
+
+        Returns:
+            threading.Thread: The started thread object.
+        """
         # start the workers
         self.system_running_flag = True
         self.worker_running_flag = True
@@ -101,6 +134,9 @@ class sensor_simulator:
         return self.worker
 
     def stop_workers(self):
+        """
+        Stop all worker threads and cleanup.
+        """
         # stop the workers
 
         self.system_running_flag = False
@@ -112,6 +148,12 @@ class sensor_simulator:
         print("All workers stopped")
 
     def server_run(self):
+        """
+        Run the TCP server to listen for connections and stream data.
+
+        Accepts a connection, starts sensor workers, and streams data from the
+        queue to the client.
+        """
         # create a socket object
         # TCP socket details (address family, socket type)
         sket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
