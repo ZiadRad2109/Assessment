@@ -57,7 +57,7 @@ for _ in range(number_of_sensors):
 
 # alarm list and alarm log file
 alarm_list = []
-alarm_log_file = "alarm_log.txt"
+
 
 
 # 3amalna thread communication queue list by using the sensor id as the index 3ashan ne kol sensor mayakhodsh el haga beta3to we yermy el ba2y
