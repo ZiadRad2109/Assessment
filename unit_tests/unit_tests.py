@@ -9,6 +9,8 @@ import json
 import sys
 import os
 from PyQt6.QtWidgets import QApplication
+from datetime import datetime
+from unittest import TextTestRunner, TextTestResult
 
 
 # Ensure the parent directory is in the path to import TCP_client
@@ -180,5 +182,69 @@ class TestSensorSystem(unittest.TestCase):
 
 
 
+LOG_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test_results.log")
+
+
+class LoggingTestResult(TextTestResult):
+    def __init__(self, stream, descriptions, verbosity):
+        super().__init__(stream, descriptions, verbosity)
+        self.log_fp = open(LOG_FILE, "a", encoding="utf-8")
+        self.log_fp.write(f"\n=== Test run started at {datetime.now().isoformat()} ===\n")
+        self.log_fp.flush()
+
+    def startTest(self, test):
+        super().startTest(test)
+        self._test_start_time = datetime.now()
+
+    def addSuccess(self, test):
+        super().addSuccess(test)
+        t = datetime.now()
+        duration = (t - self._test_start_time).total_seconds()
+        entry = f"{t.isoformat()} - {test.id()} - SUCCESS - {duration:.3f}s\n"
+        self.log_fp.write(entry)
+        self.log_fp.flush()
+
+    def addFailure(self, test, err):
+        super().addFailure(test, err)
+        t = datetime.now()
+        duration = (t - self._test_start_time).total_seconds()
+        tb = self._exc_info_to_string(err, test)
+        entry = f"{t.isoformat()} - {test.id()} - FAILURE - {duration:.3f}s - {tb}\n"
+        self.log_fp.write(entry)
+        self.log_fp.flush()
+
+    def addError(self, test, err):
+        super().addError(test, err)
+        t = datetime.now()
+        duration = (t - self._test_start_time).total_seconds()
+        tb = self._exc_info_to_string(err, test)
+        entry = f"{t.isoformat()} - {test.id()} - ERROR - {duration:.3f}s - {tb}\n"
+        self.log_fp.write(entry)
+        self.log_fp.flush()
+
+    def addSkip(self, test, reason):
+        super().addSkip(test, reason)
+        t = datetime.now()
+        duration = (t - self._test_start_time).total_seconds()
+        entry = f"{t.isoformat()} - {test.id()} - SKIPPED - {duration:.3f}s - {reason}\n"
+        self.log_fp.write(entry)
+        self.log_fp.flush()
+
+    def stopTestRun(self):
+        try:
+            self.log_fp.write(f"=== Test run finished at {datetime.now().isoformat()} ===\n")
+            self.log_fp.flush()
+        finally:
+            try:
+                self.log_fp.close()
+            except Exception:
+                pass
+
+
+class LoggingTextTestRunner(TextTestRunner):
+    resultclass = LoggingTestResult
+
+
 if __name__ == "__main__":
-    unittest.main()
+    runner = LoggingTextTestRunner(verbosity=2)
+    unittest.main(testRunner=runner)
